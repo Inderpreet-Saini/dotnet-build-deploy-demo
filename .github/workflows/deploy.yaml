@@ -7,7 +7,11 @@ on:
 
 env:
   AWS_REGION: "ap-south-1"                 
-  ECR_REPOSITORY: "ips/dotnet-demo"         
+  ECR_REPOSITORY: "ips/dotnet-demo" 
+  ECS_SERVICE: dotnet-demo
+  ECS_CLUSTER: dotnet-demo-1
+  ECS_TASK_DEFINITION: .aws/task-definition.json
+  CONTAINER_NAME: "app"
 
 jobs:
   deploy:
@@ -38,3 +42,19 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1.2.0
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1.0.1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
