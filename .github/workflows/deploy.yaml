@@ -4,14 +4,14 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'infra/**'
+
 
 env:
   AWS_REGION: "ap-south-1"                 
-  ECR_REPOSITORY: "ips/dotnet-demo" 
-  ECS_SERVICE: dotnet-demo
-  ECS_CLUSTER: dotnet-demo-1
-  ECS_TASK_DEFINITION: .aws/task-definition.json
-  CONTAINER_NAME: "app"
+  TF_VAR_ecr_image_repo: ${{ secrets.ECR_REPO_URL }}
   
 permissions:
   id-token: write  
@@ -29,7 +29,7 @@ jobs:
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::484907486596:role/github-actions
+          role-to-assume:${{ secrets.AWS_OIDC_ROLE_NAME }}
           role-session-name: GitHubActions
           aws-region: ${{ env.AWS_REGION }}
 
@@ -43,22 +43,53 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build -t $TF_VAR_ecr_image_repo:$IMAGE_TAG src/Dockerfile
+          docker push $TF_VAR_ecr_image_repo:$IMAGE_TAG
+          echo "image=$TF_VAR_ecr_image_repo:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Fill in the new image ID in the Amazon ECS task definition
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1.2.0
+      - name: Terraform Setup
+        uses: hashicorp/setup-terraform@v3
         with:
-          task-definition: ${{ env.ECS_TASK_DEFINITION }}
-          container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ steps.build-image.outputs.image }}
+          terraform_version: 1.9.5
+      
+      - name: Terraform Init
+        working-directory: ./infra
+        id: init
+        run: terraform init -backend-config="bucket=${{ secrets.TF_STATE_BUCKET_NAME }}" -backend-config="key=${{ secrets.TF_STATE_BUCKET_KEY }}" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="dynamodb_table=${{ secrets.TF_STATE_DYNAMODB_TABLE }}" -input=false
 
-      - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+      - name: Terraform Plan
+        id: plan
+        working-directory: ./infra
+        env:
+          TF_VAR_image_tag: ${{ github.sha }}
+          TF_VAR_public_ec2_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
+        run: terraform plan -no-color -input=false
+        continue-on-error: true
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Terraform Apply
+        working-directory: ./infra
+        env:
+          TF_VAR_image_tag: ${{ github.sha }}
+          TF_VAR_public_ec2_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
+        id: base
+        run: terraform apply -auto-approve -input=false
+
+      # - name: Fill in the new image ID in the Amazon ECS task definition
+      #   id: task-def
+      #   uses: aws-actions/amazon-ecs-render-task-definition@v1.2.0
+      #   with:
+      #     task-definition: ${{ env.ECS_TASK_DEFINITION }}
+      #     container-name: ${{ env.CONTAINER_NAME }}
+      #     image: ${{ steps.build-image.outputs.image }}
+
+      # - name: Deploy Amazon ECS task definition
+      #   uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      #   with:
+      #     task-definition: ${{ steps.task-def.outputs.task-definition }}
+      #     service: ${{ env.ECS_SERVICE }}
+      #     cluster: ${{ env.ECS_CLUSTER }}
+      #     wait-for-service-stability: true
