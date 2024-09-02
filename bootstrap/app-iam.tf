@@ -17,9 +17,13 @@ data "aws_iam_policy_document" "SampleApp" {
       "ec2:DescribeSecurityGroups",
       "ec2:DescribeSubnets",
       "ec2:DescribeVpcs",
+      "ec2:DescribeLaunchTemplates",
+      "ec2:DescribeLaunchTemplateVersions",
+      "ec2:DescribeImages",
       "ec2:DisassociateAddress",
       "ec2:DisassociateRouteTable",
       "ec2:ReleaseAddress",
+      "ec2:DescribeKeyPairs",
       "ecr:DescribeRepositories",
       "ecr:GetAuthorizationToken",
       "ecs:CreateCluster",
@@ -36,7 +40,9 @@ data "aws_iam_policy_document" "SampleApp" {
       "kms:CreateKey",
       "kms:ListAliases",
       "logs:DescribeLogGroups",
-      "resource-groups:CreateGroup"
+      "resource-groups:CreateGroup",
+      "autoscaling:DescribeAutoScalingGroups",
+      "ecs:DescribeCapacityProviders"
     ]
     resources = [
       "*"
@@ -209,6 +215,10 @@ data "aws_iam_policy_document" "SampleApp" {
     resources = [
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*"
       ]
+  }
+  statement {
+    actions = ["iam:GetInstanceProfile"]
+    resources = ["*"]
   }
   statement {
     actions   = [
